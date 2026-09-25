@@ -1,4 +1,4 @@
-import { dlopen, ptr } from "bun:ffi"
+import { dlopen, ptr, type Pointer } from "bun:ffi"
 import type { ReadStream } from "node:tty"
 
 const STD_INPUT_HANDLE = -10
@@ -10,15 +10,11 @@ const kernel = () =>
     GetConsoleMode: { args: ["ptr", "ptr"], returns: "i32" },
     SetConsoleMode: { args: ["ptr", "u32"], returns: "i32" },
     FlushConsoleInputBuffer: { args: ["ptr"], returns: "i32" },
-  })
-
-const crt = () =>
-  dlopen("ucrtbase.dll", {
-    _get_osfhandle: { args: ["i32"], returns: "ptr" },
+    CreateFileW: { args: ["ptr", "u32", "u32", "ptr", "u32", "u32", "ptr"], returns: "ptr" },
   })
 
 let k32: ReturnType<typeof kernel> | undefined
-let c32: ReturnType<typeof crt> | undefined
+let conin: Pointer | null | undefined
 
 function load() {
   if (process.platform !== "win32") return false
@@ -30,19 +26,23 @@ function load() {
   }
 }
 
-// process.stdin maps to STD_INPUT_HANDLE; a separately opened CONIN$ stream
-// (used when stdin is piped) needs its CRT fd translated to a console handle.
+// process.stdin maps to STD_INPUT_HANDLE. When stdin is piped the TUI reads from a
+// separately opened CONIN$ stream; translating its fd with _get_osfhandle aborts the
+// process (Bun's fds are not UCRT fds), so open our own handle to the same console.
 function inputHandle(stdin: ReadStream) {
   if (!stdin.isTTY) return
   if (!load()) return
   if (stdin === process.stdin) return k32!.symbols.GetStdHandle(STD_INPUT_HANDLE)
-  if (!("fd" in stdin) || typeof stdin.fd !== "number") return
-  try {
-    c32 ??= crt()
-  } catch {
-    return
-  }
-  return c32.symbols._get_osfhandle(stdin.fd)
+  conin ??= k32!.symbols.CreateFileW(
+    ptr(Buffer.from("CONIN$\0", "utf16le")),
+    0xc0000000, // GENERIC_READ | GENERIC_WRITE
+    3, // FILE_SHARE_READ | FILE_SHARE_WRITE
+    null,
+    3, // OPEN_EXISTING
+    0,
+    null,
+  )
+  return conin
 }
 
 /**
