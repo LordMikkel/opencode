@@ -3,6 +3,9 @@ import type { ReadStream } from "node:tty"
 
 const STD_INPUT_HANDLE = -10
 const ENABLE_PROCESSED_INPUT = 0x0001
+const GENERIC_READ_WRITE = 0xc0000000
+const FILE_SHARE_READ_WRITE = 0x3
+const OPEN_EXISTING = 3
 
 const kernel = () =>
   dlopen("kernel32.dll", {
@@ -26,19 +29,19 @@ function load() {
   }
 }
 
-// process.stdin maps to STD_INPUT_HANDLE. When stdin is piped the TUI reads from a
-// separately opened CONIN$ stream; translating its fd with _get_osfhandle aborts the
-// process (Bun's fds are not UCRT fds), so open our own handle to the same console.
-function inputHandle(stdin: ReadStream) {
+// When stdin is piped the TUI reads from a separately opened CONIN$ stream. Its fd
+// cannot be translated with _get_osfhandle (Bun fds are not UCRT fds and the CRT
+// aborts the process), so open a dedicated handle to the same console input buffer.
+function inputHandle(stdin: NodeJS.ReadStream) {
   if (!stdin.isTTY) return
   if (!load()) return
   if (stdin === process.stdin) return k32!.symbols.GetStdHandle(STD_INPUT_HANDLE)
   conin ??= k32!.symbols.CreateFileW(
-    ptr(Buffer.from("CONIN$\0", "utf16le")),
-    0xc0000000, // GENERIC_READ | GENERIC_WRITE
-    3, // FILE_SHARE_READ | FILE_SHARE_WRITE
+    Buffer.from("CONIN$\0", "utf16le"),
+    GENERIC_READ_WRITE,
+    FILE_SHARE_READ_WRITE,
     null,
-    3, // OPEN_EXISTING
+    OPEN_EXISTING,
     0,
     null,
   )
@@ -50,7 +53,7 @@ function inputHandle(stdin: ReadStream) {
  */
 export function win32DisableProcessedInput(stdin: NodeJS.ReadStream = process.stdin) {
   if (process.platform !== "win32") return
-  const handle = inputHandle(stdin as ReadStream)
+  const handle = inputHandle(stdin)
   if (!handle) return
 
   const buf = new Uint32Array(1)
@@ -66,7 +69,7 @@ export function win32DisableProcessedInput(stdin: NodeJS.ReadStream = process.st
  */
 export function win32FlushInputBuffer(stdin: NodeJS.ReadStream = process.stdin) {
   if (process.platform !== "win32") return
-  const handle = inputHandle(stdin as ReadStream)
+  const handle = inputHandle(stdin)
   if (!handle) return
   k32!.symbols.FlushConsoleInputBuffer(handle)
 }

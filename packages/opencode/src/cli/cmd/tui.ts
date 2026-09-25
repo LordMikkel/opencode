@@ -64,6 +64,17 @@ async function input(value?: string) {
   return piped + "\n" + value
 }
 
+// The renderer needs a real terminal for keyboard input even when stdin is piped as the prompt.
+function openTuiStdin() {
+  try {
+    return resolveInteractiveStdin()
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== INTERACTIVE_INPUT_ERROR) throw error
+    UI.error(`TUI ${error.message}`)
+    process.exitCode = 1
+  }
+}
+
 export function resolveThreadDirectory(project?: string, envPWD = process.env.PWD, cwd = process.cwd()) {
   const root = Filesystem.resolve(envPWD ?? cwd)
   if (project) return Filesystem.resolve(path.isAbsolute(project) ? project : path.join(root, project))
@@ -187,24 +198,11 @@ export const TuiThreadCommand = cmd({
       return
     }
 
-    let unguard: (() => void) | undefined
-    let interactiveStdin: ReturnType<typeof resolveInteractiveStdin> | undefined
+    const interactiveStdin = openTuiStdin()
+    if (!interactiveStdin) return
+    const unguard = win32InstallCtrlCGuard(interactiveStdin.stdin)
     try {
       const { TuiConfig } = await import("@/config/tui")
-      try {
-        interactiveStdin = resolveInteractiveStdin()
-      } catch (error) {
-        if (error instanceof Error && error.message === INTERACTIVE_INPUT_ERROR) {
-          UI.error(`TUI ${error.message}`)
-          process.exitCode = 1
-          return
-        }
-
-        throw error
-      }
-
-      unguard = win32InstallCtrlCGuard(interactiveStdin.stdin)
-
       if (args.fork && !args.continue && !args.session) {
         UI.error("--fork requires --continue or --session")
         process.exitCode = 1
@@ -319,8 +317,9 @@ export const TuiThreadCommand = cmd({
       try {
         unguard?.()
       } catch {}
-      interactiveStdin?.cleanup?.()
+      interactiveStdin.cleanup?.()
     }
     process.exit()
   },
 })
+// scratch
