@@ -24,13 +24,7 @@ import {
   Show,
   on,
 } from "solid-js"
-import {
-  TuiPathsProvider,
-  TuiStartupProvider,
-  TuiStdinProvider,
-  TuiTerminalEnvironmentProvider,
-  useTuiStartup,
-} from "./context/runtime"
+import { TuiPathsProvider, TuiStartupProvider, TuiTerminalEnvironmentProvider, useTuiStartup } from "./context/runtime"
 import { DialogProvider, useDialog } from "./ui/dialog"
 import { DialogProvider as DialogProviderList } from "./component/dialog-provider"
 import { ErrorComponent } from "./component/error-component"
@@ -210,7 +204,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
               consoleOptions: {
                 keyBindings: [{ name: "y", ctrl: true, action: "copy-selection" }],
               },
-              ...(input.stdin ? { stdin: input.stdin } : {}),
+              stdin: input.stdin,
             }),
           catch: (error) => (error instanceof Error ? error : new Error(String(error))),
         }),
@@ -323,12 +317,10 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                               <PromptRefProvider>
                                                                 <EditorContextProvider>
                                                                   <LocationProvider>
-                                                                    <TuiStdinProvider value={input.stdin}>
-                                                                      <App
-                                                                        onSnapshot={input.onSnapshot}
-                                                                        pluginHost={input.pluginHost}
-                                                                      />
-                                                                    </TuiStdinProvider>
+                                                                    <App
+                                                                      onSnapshot={input.onSnapshot}
+                                                                      pluginHost={input.pluginHost}
+                                                                    />
                                                                   </LocationProvider>
                                                                 </EditorContextProvider>
                                                               </PromptRefProvider>

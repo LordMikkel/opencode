@@ -1,10 +1,8 @@
 import { dlopen, ptr } from "bun:ffi"
+import type { ReadStream } from "node:tty"
+
 const STD_INPUT_HANDLE = -10
 const ENABLE_PROCESSED_INPUT = 0x0001
-
-type RawModeInput = NodeJS.ReadStream & {
-  setRawMode(mode: boolean): NodeJS.ReadStream
-}
 
 const kernel = () =>
   dlopen("kernel32.dll", {
@@ -32,37 +30,19 @@ function load() {
   }
 }
 
-function loadCrt() {
-  if (process.platform !== "win32") return false
+// process.stdin maps to STD_INPUT_HANDLE; a separately opened CONIN$ stream
+// (used when stdin is piped) needs its CRT fd translated to a console handle.
+function inputHandle(stdin: ReadStream) {
+  if (!stdin.isTTY) return
+  if (!load()) return
+  if (stdin === process.stdin) return k32!.symbols.GetStdHandle(STD_INPUT_HANDLE)
+  if (!("fd" in stdin) || typeof stdin.fd !== "number") return
   try {
     c32 ??= crt()
-    return true
   } catch {
-    return false
+    return
   }
-}
-
-function readStreamFd(stdin: NodeJS.ReadStream) {
-  if (!("fd" in stdin)) return undefined
-  return typeof stdin.fd === "number" ? stdin.fd : undefined
-}
-
-function inputHandle(stdin: NodeJS.ReadStream) {
-  if (!stdin.isTTY) return undefined
-  if (!load()) return undefined
-  if (stdin === process.stdin) return k32!.symbols.GetStdHandle(STD_INPUT_HANDLE)
-  const fd = readStreamFd(stdin)
-  if (fd === undefined) return undefined
-  if (!loadCrt()) return undefined
-  return c32!.symbols._get_osfhandle(fd)
-}
-
-function hasRawMode(input: NodeJS.ReadStream): input is RawModeInput {
-  return "setRawMode" in input && typeof input.setRawMode === "function"
-}
-
-function getRawMode(input: RawModeInput) {
-  return input.setRawMode
+  return c32.symbols._get_osfhandle(stdin.fd)
 }
 
 /**
@@ -70,13 +50,13 @@ function getRawMode(input: RawModeInput) {
  */
 export function win32DisableProcessedInput(stdin: NodeJS.ReadStream = process.stdin) {
   if (process.platform !== "win32") return
+  const handle = inputHandle(stdin as ReadStream)
+  if (!handle) return
 
-  const handle = inputHandle(stdin)
-  if (handle === undefined || handle === null) return
   const buf = new Uint32Array(1)
   if (k32!.symbols.GetConsoleMode(handle, ptr(buf)) === 0) return
 
-  const mode = buf[0]
+  const mode = buf[0]!
   if ((mode & ENABLE_PROCESSED_INPUT) === 0) return
   k32!.symbols.SetConsoleMode(handle, mode & ~ENABLE_PROCESSED_INPUT)
 }
@@ -86,9 +66,8 @@ export function win32DisableProcessedInput(stdin: NodeJS.ReadStream = process.st
  */
 export function win32FlushInputBuffer(stdin: NodeJS.ReadStream = process.stdin) {
   if (process.platform !== "win32") return
-
-  const handle = inputHandle(stdin)
-  if (handle === undefined || handle === null) return
+  const handle = inputHandle(stdin as ReadStream)
+  if (!handle) return
   k32!.symbols.FlushConsoleInputBuffer(handle)
 }
 
@@ -105,26 +84,23 @@ let unhook: (() => void) | undefined
  * - A `setRawMode(...)` hook to re-clear after known raw-mode toggles.
  * - A low-frequency poll as a backstop for native/external mode changes.
  */
-export function win32InstallCtrlCGuard(input: NodeJS.ReadStream = process.stdin): (() => void) | undefined {
-  if (process.platform !== "win32") return undefined
-  if (!input.isTTY) return undefined
-  if (!load()) return undefined
+export function win32InstallCtrlCGuard(input: NodeJS.ReadStream = process.stdin) {
+  if (process.platform !== "win32") return
   if (unhook) return unhook
 
-  const handle = inputHandle(input)
-  if (handle === undefined || handle === null) return undefined
-  if (!hasRawMode(input)) return undefined
+  const stdin = input as ReadStream
+  const original = stdin.setRawMode
 
-  const original = getRawMode(input)
-
+  const handle = inputHandle(stdin)
+  if (!handle) return
   const buf = new Uint32Array(1)
 
-  if (k32!.symbols.GetConsoleMode(handle, ptr(buf)) === 0) return undefined
-  const initial = buf[0]
+  if (k32!.symbols.GetConsoleMode(handle, ptr(buf)) === 0) return
+  const initial = buf[0]!
 
   const enforce = () => {
     if (k32!.symbols.GetConsoleMode(handle, ptr(buf)) === 0) return
-    const mode = buf[0]
+    const mode = buf[0]!
     if ((mode & ENABLE_PROCESSED_INPUT) === 0) return
     k32!.symbols.SetConsoleMode(handle, mode & ~ENABLE_PROCESSED_INPUT)
   }
@@ -135,15 +111,17 @@ export function win32InstallCtrlCGuard(input: NodeJS.ReadStream = process.stdin)
     setImmediate(enforce)
   }
 
-  let wrapped: RawModeInput["setRawMode"] | undefined
+  let wrapped: ReadStream["setRawMode"] | undefined
 
-  wrapped = (mode: boolean) => {
-    const result = original.call(input, mode)
-    later()
-    return result
+  if (typeof original === "function") {
+    wrapped = (mode: boolean) => {
+      const result = original.call(stdin, mode)
+      later()
+      return result
+    }
+
+    stdin.setRawMode = wrapped
   }
-
-  input.setRawMode = wrapped
 
   // Ensure it's cleared immediately too (covers any earlier mode changes).
   later()
@@ -157,8 +135,8 @@ export function win32InstallCtrlCGuard(input: NodeJS.ReadStream = process.stdin)
     done = true
 
     clearInterval(interval)
-    if (wrapped && input.setRawMode === wrapped) {
-      input.setRawMode = original
+    if (wrapped && stdin.setRawMode === wrapped) {
+      stdin.setRawMode = original
     }
 
     k32!.symbols.SetConsoleMode(handle, initial)
