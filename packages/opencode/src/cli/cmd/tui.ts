@@ -223,7 +223,11 @@ export const TuiThreadCommand = cmd({
       }
       const cwd = Filesystem.resolve(process.cwd())
 
-      const worker = new Worker(file)
+      const worker = new Worker(file, {
+        env: Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        ),
+      })
       const client = Rpc.client<typeof rpc>(worker)
       const reload = () => {
         client.call("reload", undefined).catch(() => {})
@@ -317,6 +321,6 @@ export const TuiThreadCommand = cmd({
       } catch {}
       interactiveStdin?.cleanup?.()
     }
-    process.exit(0)
+    process.exit()
   },
 })
