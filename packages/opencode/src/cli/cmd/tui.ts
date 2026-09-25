@@ -322,4 +322,3 @@ export const TuiThreadCommand = cmd({
     process.exit()
   },
 })
-// scratch
