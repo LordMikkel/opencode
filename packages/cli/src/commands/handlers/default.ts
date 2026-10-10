@@ -15,12 +15,21 @@ import { Service } from "@opencode/client/effect/service"
 import { OpenCode } from "@opencode/client/promise"
 import { findSession } from "../../session-target"
 import { errorMessage } from "../../util/error"
+import { resolveInteractiveStdin } from "../../mini-host"
 
 export default Runtime.handler(Commands, (input) =>
   Effect.gen(function* () {
     const requestedDirectory = Option.getOrUndefined(input.directory)
     const requestedServer = Option.getOrUndefined(input.server)
     if (requestedDirectory !== undefined) process.chdir(requestedDirectory)
+    // When stdin is piped, keyboard input has to come from the terminal itself.
+    const terminal = yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => resolveInteractiveStdin(),
+        catch: (cause) => new Error("opencode requires a controlling terminal for input", { cause }),
+      }),
+      (terminal) => Effect.sync(() => terminal.cleanup()),
+    )
     const preflight = UpdatePreflight.make()
     yield* Effect.addFinalizer(() => Effect.promise(() => preflight.close()))
     const serviceStarts = yield* Queue.unbounded<{
@@ -141,6 +150,7 @@ export default Runtime.handler(Commands, (input) =>
       },
       environment: requestedServer === undefined ? Env.session() : undefined,
       terminalHandoff: () => preflight.finish(),
+      stdin: terminal.stdin,
       log: (level, message, tags) => {
         const effect =
           level === "debug"
