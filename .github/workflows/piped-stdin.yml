@@ -23,6 +23,11 @@ jobs:
         if: runner.os == 'Windows'
         run: python -m pip install pywinpty
 
+      - name: Probe CONIN$
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python .github/piped-stdin/probe.py
+
       - name: With fix, the TUI receives keys
         shell: bash
         run: python .github/piped-stdin/check.py works
