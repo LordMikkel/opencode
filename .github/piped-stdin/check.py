@@ -31,6 +31,7 @@ if os.name == "nt":
                 return
 
     write = proc.write
+    alive = proc.isalive
     stop = lambda: proc.terminate(force=True)
 else:
     import fcntl
@@ -57,6 +58,7 @@ else:
             append(data)
 
     write = lambda text: os.write(fd, text.encode())
+    alive = lambda: os.waitpid(pid, os.WNOHANG) == (0, 0)
     stop = lambda: os.kill(pid, signal.SIGKILL)
 
 threading.Thread(target=reader, daemon=True).start()
@@ -68,20 +70,21 @@ def snapshot():
 
 
 deadline = time.time() + 240
-while b"Ask anything" not in snapshot() and time.time() < deadline:
+while b"Ask anything" not in snapshot() and alive() and time.time() < deadline:
     time.sleep(1)
 ready = b"Ask anything" in snapshot()
+print("tui ready:", ready)
+if not ready:
+    print("process alive:", alive())
+    print("output:", repr(snapshot()[-4000:]))
+    sys.exit(2)
 before = len(snapshot())
 write(word)
 time.sleep(5)
 after = snapshot()[before:]
 stop()
 
-print("tui ready:", ready)
 print("output after typing:", repr(after[:800]))
-if not ready:
-    print("tail:", repr(snapshot()[-3000:]))
-    sys.exit(2)
 
 # On POSIX a TUI that ignores the keys still shows them through the tty echo,
 # so only count the word when the TUI drew it with its own colors.
