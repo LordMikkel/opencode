@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 10
 
       - uses: ./.github/actions/setup-bun
 
@@ -31,5 +31,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          git checkout HEAD~2 -- packages/cli/src/commands/handlers/default.ts packages/tui/src/app.tsx packages/tui/src/editor.ts
+          git checkout c380815026~1 -- packages/cli/src/commands/handlers/default.ts packages/tui/src/app.tsx packages/tui/src/editor.ts
           python .github/piped-stdin/check.py broken
