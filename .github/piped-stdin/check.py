@@ -21,7 +21,9 @@ def append(data):
 if os.name == "nt":
     from winpty import PtyProcess
 
-    proc = PtyProcess.spawn('cmd /c "echo piped| bun run src/index.ts --standalone"', cwd=cwd, dimensions=(40, 120))
+    proc = PtyProcess.spawn(
+        ["cmd", "/c", "echo piped| bun run src/index.ts --standalone"], cwd=cwd, dimensions=(40, 120)
+    )
 
     def reader():
         while True:
