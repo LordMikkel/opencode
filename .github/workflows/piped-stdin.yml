@@ -1,0 +1,35 @@
+name: piped-stdin
+
+on:
+  push:
+    branches: [tui-piped-stdin-ci]
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Install pywinpty
+        if: runner.os == 'Windows'
+        run: python -m pip install pywinpty
+
+      - name: With fix, the TUI receives keys
+        shell: bash
+        run: python .github/piped-stdin/check.py works
+
+      - name: Without fix, the TUI ignores keys
+        if: always()
+        shell: bash
+        run: |
+          git checkout HEAD~2 -- packages/cli/src/commands/handlers/default.ts packages/tui/src/app.tsx packages/tui/src/editor.ts
+          python .github/piped-stdin/check.py broken
